@@ -632,7 +632,7 @@ class GameViewController: UIViewController {
             var dz = -cy*(-ny) + (-sy)*nx
             let len: Float = (dx*dx + dz*dz).squareRoot()
             if len > 0 { dx /= len; dz /= len }
-            let v: Float = speed * mm * dt
+            let v: Float = Float(speed) * Float(mm) * Float(dt)
             let npx = cam.position.x + dx * v
             let npz = cam.position.z + dz * v
             if !collides(npx, cam.position.z) { cam.position.x = npx }
@@ -641,8 +641,8 @@ class GameViewController: UIViewController {
             bobT += dt * (canSp ? Float(14) : Float(9)) * mm
             bobA += ((canSp ? Float(0.055) : Float(0.028)) - bobA) * Float(5) * dt
             shakeA += ((canSp ? Float(0.012) : Float(0.003)) - shakeA) * Float(5) * dt
-            stepClk += dt * speed * mm
-            if stepClk >= (canSp ? 0.35 : 0.5) { stepClk = 0; playStep() }
+            stepClk += Float(dt) * Float(speed) * Float(mm)
+            if stepClk >= (canSp ? Float(0.35) : Float(0.5)) { stepClk = 0; playStep() }
         } else {
             bobA *= 1-4*dt; shakeA *= 1-4*dt; stepClk *= 0.9
         }
