@@ -638,8 +638,8 @@ class GameViewController: UIViewController {
             if !collides(cam.position.x, npz) { cam.position.z = npz }
             
             bobT += dt * (canSp ? Float(14) : Float(9)) * mm
-            bobA += ((canSp ? 0.055 : 0.028) - bobA) * 5 * dt
-            shakeA += ((canSp ? 0.012 : 0.003) - shakeA) * 5 * dt
+            bobA += ((canSp ? Float(0.055) : Float(0.028)) - bobA) * Float(5) * dt
+            shakeA += ((canSp ? Float(0.012) : Float(0.003)) - shakeA) * Float(5) * dt
             stepClk += dt * speed * mm
             if stepClk >= (canSp ? 0.35 : 0.5) { stepClk = 0; playStep() }
         } else {
