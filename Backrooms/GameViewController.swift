@@ -240,7 +240,7 @@ class GameViewController: UIViewController {
         // Doors
         for y in stride(from: 1, to: gh, by: 4) { for x in stride(from: 0, to: gw, by: 5) {
             if Float.random(in: 0...1) < 0.5 {
-                addDoor(x: CGFloat(x)*cs+cs/2, z: CGFloat(y)*cs, m: drM, axis: .y)
+                addDoor(x: CGFloat(x)*cs+cs/2, z: CGFloat(y)*cs, m: drM, axis: 0)
             }
         }}
     }
@@ -292,7 +292,7 @@ class GameViewController: UIViewController {
         
         // Light cone (visible volumetric-like)
         if !broken {
-            let cone = SCNCone(topRadius: 0.3, bottomRadius: 2.0, height: Float(wh - 0.3))
+            let cone = SCNCone(topRadius: 0.3, bottomRadius: 2.0, height: CGFloat(wh - 0.3))
             let coneMat = SCNMaterial()
             coneMat.diffuse.contents = UIColor(red: 1, green: 0.98, blue: 0.85, alpha: 0.02)
             coneMat.transparent.contents = UIColor(white: 1, alpha: 0.02)
@@ -418,10 +418,10 @@ class GameViewController: UIViewController {
         
         // Check doors
         for i in 0..<doors.count {
-            let d = doors[i]
+            var d = doors[i]
             let dp = d.node.presentation.worldPosition
             let dx = pos.x - dp.x, dz = pos.z - dp.z
-            if dx*dx + dz*dz < 4.0 { // within range
+            if dx*dx + dz*dz < 4.0 {
                 d.open = !d.open
                 playDoor()
                 doors[i] = d
@@ -431,7 +431,7 @@ class GameViewController: UIViewController {
         
         // Check drawers
         for i in 0..<drawers.count {
-            let dr = drawers[i]
+            var dr = drawers[i]
             let dp = dr.node.presentation.worldPosition
             let dx = pos.x - dp.x, dz = pos.z - dp.z
             if dx*dx + dz*dz < 3.0 {
@@ -637,7 +637,7 @@ class GameViewController: UIViewController {
             if !collides(npx, cam.position.z) { cam.position.x = npx }
             if !collides(cam.position.x, npz) { cam.position.z = npz }
             
-            bobT += dt * (canSp ? 14 : 9) * mm
+            bobT += dt * (canSp ? Float(14) : Float(9)) * mm
             bobA += ((canSp ? 0.055 : 0.028) - bobA) * 5 * dt
             shakeA += ((canSp ? 0.012 : 0.003) - shakeA) * 5 * dt
             stepClk += dt * speed * mm
@@ -693,7 +693,7 @@ class GameViewController: UIViewController {
         
         // Animate doors
         for i in 0..<doors.count {
-            let d = doors[i]
+            var d = doors[i]
             let target: Float = d.open ? Float.pi/2 : 0
             d.angle += (target - d.angle) * 4 * dt
             d.node.eulerAngles.y = d.angle
@@ -702,7 +702,7 @@ class GameViewController: UIViewController {
         
         // Animate drawers
         for i in 0..<drawers.count {
-            let dr = drawers[i]
+            var dr = drawers[i]
             let target: Float = dr.open ? 0.4 : 0
             dr.offset += (target - dr.offset) * 5 * dt
             dr.node.position.z = 0.01 + dr.offset
