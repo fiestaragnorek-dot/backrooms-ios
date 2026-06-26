@@ -615,7 +615,7 @@ class GameViewController: UIViewController {
             cam.eulerAngles.z = wakeT < 0.75 ? sin(wakeT * 14) * (1 - wakeT) * 0.04 : cam.eulerAngles.z * 0.92
         }
         
-        let mm: Float = min(1, sqrt(jX*jX + jY*jY))
+        let mm: Float = min(Float(1), (jX*jX + jY*jY).squareRoot())
         let moving = mm > 0.1
         let canSp = sprinting && stam > 0
         
@@ -630,7 +630,7 @@ class GameViewController: UIViewController {
             let sy = sin(yaw), cy = cos(yaw)
             var dx = -sy*(-ny) + cy*nx
             var dz = -cy*(-ny) + (-sy)*nx
-            let len: Float = sqrt(dx*dx+dz*dz)
+            let len: Float = (dx*dx + dz*dz).squareRoot()
             if len > 0 { dx /= len; dz /= len }
             let v: Float = speed * mm * dt
             let npx = cam.position.x + dx * v
