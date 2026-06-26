@@ -630,9 +630,9 @@ class GameViewController: UIViewController {
             let sy = sin(yaw), cy = cos(yaw)
             var dx = -sy*(-ny) + cy*nx
             var dz = -cy*(-ny) + (-sy)*nx
-            let len = sqrt(dx*dx+dz*dz)
+            let len: Float = sqrt(dx*dx+dz*dz)
             if len > 0 { dx /= len; dz /= len }
-            let v = speed * mm * dt
+            let v: Float = speed * mm * dt
             let npx = cam.position.x + dx*v, npz = cam.position.z + dz*v
             if !collides(npx, cam.position.z) { cam.position.x = npx }
             if !collides(cam.position.x, npz) { cam.position.z = npz }
