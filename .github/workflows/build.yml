@@ -1,0 +1,45 @@
+name: Build IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install xcodegen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate
+      - name: Build
+        run: |
+          xcodebuild \
+            -project Backrooms.xcodeproj \
+            -scheme Backrooms \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            EXPANDED_CODE_SIGN_IDENTITY="" \
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            ENABLE_BITCODE=NO \
+            ONLY_ACTIVE_ARCH=NO \
+            clean build
+      - name: Package IPA
+        run: |
+          APP=$(find build/Build/Products/Release-iphoneos -name "Backrooms.app" -type d | head -1)
+          mkdir -p Payload
+          cp -r "$APP" Payload/
+          zip -qr Backrooms.ipa Payload/
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: Backrooms
+          path: Backrooms.ipa
+          retention-days: 30

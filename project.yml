@@ -1,0 +1,23 @@
+name: Backrooms
+options:
+  bundleIdPrefix: com.backrooms
+  deploymentTarget:
+    iOS: "15.0"
+targets:
+  Backrooms:
+    type: application
+    platform: iOS
+    sources: [Backrooms]
+    resources: [Backrooms/Resources]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.backrooms.game
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "2"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: true
+        INFOPLIST_FILE: Backrooms/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Backrooms/Entitlements.plist
+        ENABLE_BITCODE: NO
+        SWIFT_OPTIMIZATION_LEVEL: "-O"
