@@ -18,6 +18,5 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: true
         INFOPLIST_FILE: Backrooms/Info.plist
-        CODE_SIGN_ENTITLEMENTS: Backrooms/Entitlements.plist
         ENABLE_BITCODE: NO
         SWIFT_OPTIMIZATION_LEVEL: "-O"
