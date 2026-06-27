@@ -2,6 +2,16 @@ import UIKit
 import SceneKit
 import AVFoundation
 
+enum StreamRoomKind {
+    case normal
+    case emptyLarge
+    case junkPile
+    case slide
+    case fakeUpMaze
+    case stairsStraight
+    case stairsSpiral
+}
+
 class GameViewController: UIViewController {
     
     // Scene
@@ -69,16 +79,20 @@ class GameViewController: UIViewController {
     private var redOv: UIView!
     private var menuOv: UIView!
     private var promptLabel: UILabel!
+    private var logOv: UIView?
+    private var firstTickLogged = false
     
     // MARK: - Lifecycle
     override func viewDidLoad() {
         super.viewDidLoad()
+        LatestLog.log("GameViewController viewDidLoad start")
         view.backgroundColor = .black
         loadRes()
         setupScene()
         buildLevel()
         setupUI()
         showMenu()
+        LatestLog.log("GameViewController viewDidLoad done")
         lastT = CACurrentMediaTime()
         displayLink = CADisplayLink(target: self, selector: #selector(tick))
         displayLink?.preferredFramesPerSecond = 24
@@ -92,10 +106,12 @@ class GameViewController: UIViewController {
     
     // MARK: - Resources
     private func loadRes() {
+        LatestLog.log("loadRes start")
         let b = Bundle.main
         wallImg = img("wall", b); carpImg = img("carpet", b); ceilImg = img("ceiling", b)
         lampImg = img("lamp", b); metImg = img("metal", b); woodImg = img("wood", b)
         baseImg = img("baseboard", b); colImg = img("column", b)
+        LatestLog.log("loadRes done")
     }
     private func img(_ n: String, _ b: Bundle) -> UIImage {
         if let u = b.url(forResource: n, withExtension: "png", subdirectory: "Resources"),
@@ -129,6 +145,7 @@ class GameViewController: UIViewController {
     
     // MARK: - Scene
     private func setupScene() {
+        LatestLog.log("setupScene start")
         sv = SCNView(frame: view.bounds)
         sv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         sv.backgroundColor = UIColor(red: 0.78, green: 0.71, blue: 0.38, alpha: 1)
@@ -152,14 +169,17 @@ class GameViewController: UIViewController {
         cam.position = SCNVector3(Float(cs/2), pY, Float(cs/2))
         scene.rootNode.addChildNode(cam)
         sv.pointOfView = cam
+        LatestLog.log("setupScene done")
     }
     
     // MARK: - Build / streaming 3x3 rooms
     private func buildLevel() {
+        LatestLog.log("buildLevel streaming start")
         scene.rootNode.addChildNode(worldRoot)
         // MazeGenerator is no longer used for the visible level: the world is infinite/streamed.
         // Keeping this method tiny prevents a huge SceneKit scene from being created at launch.
         rebuildActiveRooms(force: true)
+        LatestLog.log("buildLevel streaming done")
     }
 
     private func roomCoord() -> (Int, Int) {
@@ -177,6 +197,7 @@ class GameViewController: UIViewController {
         let (rx, ry) = roomCoord()
         if !force && rx == currentRoomX && ry == currentRoomY { return }
         currentRoomX = rx; currentRoomY = ry
+        LatestLog.log("rebuildActiveRooms center=\(rx),\(ry)")
 
         worldRoot.removeFromParentNode()
         worldRoot = SCNNode()
@@ -200,6 +221,7 @@ class GameViewController: UIViewController {
     }
 
     private func buildRoom(x: Int, y: Int, centerX: Int, centerY: Int) {
+        let kind = roomKind(x, y)
         let special = specialTypeForRoom(x, y)
         let wM = mat(forType: special, base: mat(wallImg, 2, 1))
         let fM = mat(carpImg, 3, 3)
@@ -217,13 +239,15 @@ class GameViewController: UIViewController {
 
         let fg = SCNBox(width: cs, height: 0.02, length: cs, chamferRadius: 0)
         fg.materials = [fM]
-        let fn = SCNNode(geometry: fg); fn.position = SCNVector3(Float(cx), -0.01, Float(cz))
+        let fn = SCNNode(geometry: fg); fn.position = SCNVector3(Float(cx), Float(-0.01), Float(cz))
         worldRoot.addChildNode(fn)
 
-        let cg = SCNBox(width: cs, height: 0.05, length: cs, chamferRadius: 0)
-        cg.materials = [cM]
-        let cn = SCNNode(geometry: cg); cn.position = SCNVector3(Float(cx), Float(wh), Float(cz))
-        worldRoot.addChildNode(cn)
+        if kind != .fakeUpMaze {
+            let cg = SCNBox(width: cs, height: 0.05, length: cs, chamferRadius: 0)
+            cg.materials = [cM]
+            let cn = SCNNode(geometry: cg); cn.position = SCNVector3(Float(cx), Float(wh), Float(cz))
+            worldRoot.addChildNode(cn)
+        }
 
         addWallWithGap(horizontal: true, x: cx, z: oz, m: wM, base: bM)
         addWallWithGap(horizontal: false, x: ox, z: cz, m: wM, base: bM)
@@ -232,7 +256,21 @@ class GameViewController: UIViewController {
 
         if hash01(x, y, 10) < 0.55 { addLamp(x: cx, z: cz, broken: hash01(x,y,11) < 0.12 || special == .dark, special: special) }
 
-        if hash01(x, y, 20) < 0.25 {
+        if kind == .emptyLarge {
+            addLargeEmptyRoomHints(cx: cx, cz: cz, m: coM)
+        } else if kind == .junkPile {
+            addJunkPile(cx: cx, cz: cz, m: wdM, metal: mM, seedX: x, seedY: y)
+        } else if kind == .slide {
+            addSlidePassage(cx: cx, cz: cz, m: mM, seedX: x, seedY: y)
+        } else if kind == .fakeUpMaze {
+            addFakeUpMaze(cx: cx, cz: cz, wall: wM, floor: cM, seedX: x, seedY: y)
+        } else if kind == .stairsStraight {
+            addStraightStairs(cx: cx, cz: cz, m: wdM, seedX: x, seedY: y)
+        } else if kind == .stairsSpiral {
+            addSpiralStairs(cx: cx, cz: cz, m: wdM)
+        }
+
+        if kind != .emptyLarge && hash01(x, y, 20) < 0.25 {
             let colG = SCNBox(width: 0.28, height: wh, length: 0.28, chamferRadius: 0)
             colG.materials = [coM]
             let col = SCNNode(geometry: colG)
@@ -240,9 +278,11 @@ class GameViewController: UIViewController {
             worldRoot.addChildNode(col); walls.append(col)
         }
 
-        if hash01(x, y, 30) < 0.34 { addTable(x: cx + jitter(x,y,31)*0.7, z: cz + jitter(x,y,32)*0.7, m: wdM) }
-        if hash01(x, y, 40) < 0.24 { addCabinet(x: cx + jitter(x,y,41)*0.7, z: cz + jitter(x,y,42)*0.7, m: wdM) }
-        if hash01(x, y, 50) < 0.20 { addDoor(x: cx, z: oz + 0.08, m: drM, axis: 0) }
+        if kind == .normal || kind == .fakeUpMaze {
+            if hash01(x, y, 30) < 0.34 { addTable(x: cx + jitter(x,y,31)*0.7, z: cz + jitter(x,y,32)*0.7, m: wdM) }
+            if hash01(x, y, 40) < 0.24 { addCabinet(x: cx + jitter(x,y,41)*0.7, z: cz + jitter(x,y,42)*0.7, m: wdM) }
+        }
+        if kind != .slide && hash01(x, y, 50) < 0.20 { addDoor(x: cx, z: oz + 0.08, m: drM, axis: 0) }
 
         if hash01(x, y, 60) < 0.35 {
             let pg = SCNCylinder(radius: 0.035, height: cs); pg.materials = [mM]
@@ -273,6 +313,107 @@ class GameViewController: UIViewController {
         }
     }
 
+    private func roomKind(_ x: Int, _ y: Int) -> StreamRoomKind {
+        let v = hash01(x, y, 7)
+        if v < 0.07 { return .emptyLarge }
+        if v < 0.14 { return .junkPile }
+        if v < 0.19 { return .slide }
+        if v < 0.24 { return .fakeUpMaze }
+        if v < 0.30 { return .stairsStraight }
+        if v < 0.34 { return .stairsSpiral }
+        return .normal
+    }
+
+    private func slideDirection(_ x: Int, _ y: Int) -> SCNVector3 {
+        let n = Int(hash01(x, y, 77) * 4)
+        switch n {
+        case 0: return SCNVector3(1, 0, 0)
+        case 1: return SCNVector3(-1, 0, 0)
+        case 2: return SCNVector3(0, 0, 1)
+        default: return SCNVector3(0, 0, -1)
+        }
+    }
+
+    private func addLargeEmptyRoomHints(cx: CGFloat, cz: CGFloat, m: SCNMaterial) {
+        // A big empty room illusion: sparse corner columns and a darker wide center.
+        for (dx, dz) in [(-1.45,-1.45),(1.45,-1.45),(-1.45,1.45),(1.45,1.45)] {
+            let g = SCNBox(width: 0.16, height: wh, length: 0.16, chamferRadius: 0)
+            g.materials = [m]
+            let n = SCNNode(geometry: g)
+            n.position = SCNVector3(Float(cx + CGFloat(dx)), Float(wh/2), Float(cz + CGFloat(dz)))
+            worldRoot.addChildNode(n); walls.append(n)
+        }
+    }
+
+    private func addJunkPile(cx: CGFloat, cz: CGFloat, m: SCNMaterial, metal: SCNMaterial, seedX: Int, seedY: Int) {
+        for i in 0..<10 {
+            let w = CGFloat(Float(0.25) + hash01(seedX, seedY, 100+i) * Float(0.45))
+            let h = CGFloat(Float(0.18) + hash01(seedX, seedY, 130+i) * Float(0.55))
+            let d = CGFloat(Float(0.25) + hash01(seedX, seedY, 160+i) * Float(0.45))
+            let g = SCNBox(width: w, height: h, length: d, chamferRadius: 0)
+            g.materials = [(i % 3 == 0) ? metal : m]
+            let n = SCNNode(geometry: g)
+            n.position = SCNVector3(Float(cx + jitter(seedX, seedY, 200+i) * 1.05), Float(h/2), Float(cz + jitter(seedX, seedY, 240+i) * 1.05))
+            n.eulerAngles.y = Float(hash01(seedX, seedY, 280+i) * Float.pi)
+            worldRoot.addChildNode(n); walls.append(n)
+        }
+    }
+
+    private func addSlidePassage(cx: CGFloat, cz: CGFloat, m: SCNMaterial, seedX: Int, seedY: Int) {
+        let dir = slideDirection(seedX, seedY)
+        let g = SCNBox(width: 1.45, height: 0.08, length: 3.2, chamferRadius: 0)
+        g.materials = [m]
+        let n = SCNNode(geometry: g)
+        n.position = SCNVector3(Float(cx), Float(0.18), Float(cz))
+        if abs(dir.x) > 0 { n.eulerAngles.y = Float.pi/2 }
+        n.eulerAngles.x = (dir.z >= 0 || dir.x >= 0) ? Float(-0.28) : Float(0.28)
+        worldRoot.addChildNode(n)
+    }
+
+    private func addFakeUpMaze(cx: CGFloat, cz: CGFloat, wall: SCNMaterial, floor: SCNMaterial, seedX: Int, seedY: Int) {
+        let deck = SCNBox(width: cs * 0.92, height: 0.04, length: cs * 0.92, chamferRadius: 0)
+        deck.materials = [floor]
+        let dn = SCNNode(geometry: deck)
+        dn.position = SCNVector3(Float(cx), Float(wh + 2.2), Float(cz))
+        worldRoot.addChildNode(dn)
+        for i in 0..<6 {
+            let horizontal = i % 2 == 0
+            let g = SCNBox(width: horizontal ? 2.1 : 0.09, height: 1.1, length: horizontal ? 0.09 : 2.1, chamferRadius: 0)
+            g.materials = [wall]
+            let n = SCNNode(geometry: g)
+            n.position = SCNVector3(Float(cx + jitter(seedX, seedY, 310+i)*1.15), Float(wh + 2.75), Float(cz + jitter(seedX, seedY, 340+i)*1.15))
+            worldRoot.addChildNode(n)
+        }
+    }
+
+    private func addStraightStairs(cx: CGFloat, cz: CGFloat, m: SCNMaterial, seedX: Int, seedY: Int) {
+        let dir = slideDirection(seedX, seedY)
+        for i in 0..<7 {
+            let g = SCNBox(width: 1.15, height: 0.12, length: 0.42, chamferRadius: 0)
+            g.materials = [m]
+            let n = SCNNode(geometry: g)
+            let off = CGFloat(i) * 0.34 - 1.05
+            n.position = SCNVector3(Float(cx + CGFloat(dir.x) * off), Float(0.08 + CGFloat(i) * 0.12), Float(cz + CGFloat(dir.z) * off))
+            if abs(dir.x) > 0 { n.eulerAngles.y = Float.pi/2 }
+            worldRoot.addChildNode(n)
+        }
+    }
+
+    private func addSpiralStairs(cx: CGFloat, cz: CGFloat, m: SCNMaterial) {
+        let poleG = SCNCylinder(radius: 0.045, height: 2.6); poleG.materials = [m]
+        let pole = SCNNode(geometry: poleG); pole.position = SCNVector3(Float(cx), Float(1.3), Float(cz))
+        worldRoot.addChildNode(pole)
+        for i in 0..<10 {
+            let g = SCNBox(width: 0.85, height: 0.08, length: 0.28, chamferRadius: 0)
+            g.materials = [m]
+            let n = SCNNode(geometry: g)
+            let a = Float(i) * 0.65
+            n.position = SCNVector3(Float(cx) + cos(a) * Float(0.55), Float(0.15) + Float(i) * Float(0.14), Float(cz) + sin(a) * Float(0.55))
+            n.eulerAngles.y = -a
+            worldRoot.addChildNode(n)
+        }
+    }
+
     private func specialTypeForRoom(_ x: Int, _ y: Int) -> SpecialType {
         let v = hash01(x, y, 99)
         if v < 0.04 { return .red }
@@ -288,7 +429,7 @@ class GameViewController: UIViewController {
     }
 
     private func jitter(_ x: Int, _ y: Int, _ salt: Int) -> CGFloat {
-        return CGFloat(hash01(x, y, salt) * 2 - 1)
+        return CGFloat(hash01(x, y, salt) * Float(2) - Float(1))
     }
     
     private func mat(forType: SpecialType, base: SCNMaterial) -> SCNMaterial {
@@ -606,10 +747,49 @@ class GameViewController: UIViewController {
         play.heightAnchor.constraint(equalToConstant: 50).isActive = true
         play.addTarget(self, action: #selector(startGame), for: .touchUpInside)
         
+        let logBtn = UIButton(type: .custom)
+        logBtn.setTitle("LATESTLOG", for: .normal)
+        logBtn.titleLabel?.font = UIFont(name: "Courier", size: 12)
+        logBtn.setTitleColor(UIColor(red: 0.9, green: 0.82, blue: 0.45, alpha: 0.55), for: .normal)
+        logBtn.backgroundColor = UIColor(white: 1, alpha: 0.04)
+        logBtn.layer.cornerRadius = 6
+        logBtn.layer.borderWidth = 1
+        logBtn.layer.borderColor = UIColor(red: 0.9, green: 0.82, blue: 0.45, alpha: 0.18).cgColor
+        logBtn.translatesAutoresizingMaskIntoConstraints = false
+        menuOv.addSubview(logBtn)
+        logBtn.centerXAnchor.constraint(equalTo: menuOv.centerXAnchor).isActive = true
+        logBtn.topAnchor.constraint(equalTo: play.bottomAnchor, constant: 12).isActive = true
+        logBtn.widthAnchor.constraint(equalToConstant: 140).isActive = true
+        logBtn.heightAnchor.constraint(equalToConstant: 34).isActive = true
+        logBtn.addTarget(self, action: #selector(showLatestLog), for: .touchUpInside)
+        
         view.addSubview(menuOv)
     }
     
+    @objc private func showLatestLog() {
+        let vc = UIViewController()
+        vc.view.backgroundColor = .black
+        let tv = UITextView(frame: vc.view.bounds)
+        tv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        tv.backgroundColor = .black
+        tv.textColor = UIColor(red: 0.9, green: 0.82, blue: 0.45, alpha: 1)
+        tv.font = UIFont(name: "Menlo", size: 11) ?? UIFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        tv.isEditable = false
+        tv.text = LatestLog.text()
+        vc.view.addSubview(tv)
+        let close = UIButton(type: .system)
+        close.setTitle("Закрыть", for: .normal)
+        close.tintColor = UIColor(red: 0.9, green: 0.82, blue: 0.45, alpha: 1)
+        close.backgroundColor = UIColor.black.withAlphaComponent(0.65)
+        close.frame = CGRect(x: 12, y: 12, width: 100, height: 36)
+        close.layer.cornerRadius = 8
+        close.addAction(UIAction { [weak vc] _ in vc?.dismiss(animated: true) }, for: .touchUpInside)
+        vc.view.addSubview(close)
+        present(vc, animated: true)
+    }
+    
     @objc private func startGame() {
+        LatestLog.log("startGame tapped")
         inMenu = false
         displayLink?.isPaused = false
         sv.isPlaying = true
@@ -642,6 +822,22 @@ class GameViewController: UIViewController {
         }
     }
     
+    private func handleRoomEffects(dt: Float) {
+        let (rx, ry) = roomCoord()
+        let kind = roomKind(rx, ry)
+        if kind == .slide && !waking {
+            let dir = slideDirection(rx, ry)
+            let force: Float = 4.8 * dt
+            cam.position.x += dir.x * force
+            cam.position.z += dir.z * force
+            pY += (0.72 - pY) * min(1, dt * 4)
+            pitch += (0.28 - pitch) * min(1, dt * 2)
+            heaveA = max(heaveA, 0.012)
+            promptLabel.isHidden = false
+            promptLabel.text = "СКОЛЬЖЕНИЕ ВНИЗ — НАЗАД НЕ ПОДНЯТЬСЯ"
+        }
+    }
+
     // MARK: - Loop
     @objc private func tick() {
         let now = CACurrentMediaTime()
@@ -649,6 +845,7 @@ class GameViewController: UIViewController {
         if dt > 0.1 { dt = 0.1 }
         
         if inMenu { return }
+        if !firstTickLogged { firstTickLogged = true; LatestLog.log("first gameplay tick") }
         
         // Wake
         if waking {
@@ -702,6 +899,7 @@ class GameViewController: UIViewController {
         
         // Stream rooms: only keep a 3x3 block around the player.
         rebuildActiveRoomsIfNeeded()
+        handleRoomEffects(dt: dt)
         
         // Stamina UI
         stamFill.frame = CGRect(x: 0, y: 0, width: stamBar.frame.width * CGFloat(stam), height: stamBar.frame.height)
