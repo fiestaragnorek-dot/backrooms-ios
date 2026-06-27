@@ -22,6 +22,7 @@ class GameViewController: UIViewController {
     private var yaw: Float = 0, pitch: Float = 0
     private var stam: Float = 1.0
     private var sprinting = false, waking = true, inMenu = true
+    private var displayLink: CADisplayLink?
     private var wakeT: Float = 0
     private var bobT: Float = 0, bobA: Float = 0, shakeA: Float = 0, heaveA: Float = 0
     private var jX: Float = 0, jY: Float = 0
@@ -74,8 +75,9 @@ class GameViewController: UIViewController {
         setupUI()
         showMenu()
         lastT = CACurrentMediaTime()
-        let dl = CADisplayLink(target: self, selector: #selector(tick))
-        dl.add(to: .main, forMode: .common)
+        displayLink = CADisplayLink(target: self, selector: #selector(tick))
+        displayLink?.preferredFramesPerSecond = 30
+        displayLink?.add(to: .main, forMode: .common)
     }
     
     override var prefersStatusBarHidden: Bool { true }
@@ -124,19 +126,22 @@ class GameViewController: UIViewController {
         sv = SCNView(frame: view.bounds)
         sv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         sv.backgroundColor = UIColor(red: 0.78, green: 0.71, blue: 0.38, alpha: 1)
-        sv.antialiasingMode = .multisampling2X
+        sv.antialiasingMode = .none
+        sv.preferredFramesPerSecond = 30
+        sv.rendersContinuously = true
+        sv.isPlaying = true
         view.addSubview(sv)
         
         scene = SCNScene(); sv.scene = scene
         scene.fogStartDistance = 1
-        scene.fogEndDistance = 40
+        scene.fogEndDistance = 28
         scene.fogColor = UIColor(red: 0.78, green: 0.71, blue: 0.38, alpha: 1)
         
         cam = SCNNode()
         cam.camera = SCNCamera()
         cam.camera!.fieldOfView = 72
-        cam.camera!.zNear = 0.05; cam.camera!.zFar = 55
-        cam.camera!.wantsHDR = true
+        cam.camera!.zNear = 0.05; cam.camera!.zFar = 35
+        cam.camera!.wantsHDR = false
         cam.camera!.exposureOffset = 0.1
         cam.position = SCNVector3(Float(cs/2), pY, Float(cs/2))
         scene.rootNode.addChildNode(cam)
@@ -192,8 +197,8 @@ class GameViewController: UIViewController {
         let cn = SCNNode(geometry: cg); cn.position = SCNVector3(Float(bw/2), Float(wh), Float(bh/2))
         scene.rootNode.addChildNode(cn)
         
-        // Lamps (only every 3rd cell for performance)
-        for y in stride(from: 0, to: gh, by: 2) { for x in stride(from: 0, to: gw, by: 2) {
+        // Lamps: keep the count low on real iPhones to avoid memory/GPU crashes.
+        for y in stride(from: 0, to: gh, by: 3) { for x in stride(from: 0, to: gw, by: 3) {
             let lx = CGFloat(x) * cs + cs/2, lz = CGFloat(y) * cs + cs/2
             let cell = maze.grid[y][x]
             let broken = Float.random(in: 0...1) < 0.1
@@ -290,21 +295,9 @@ class GameViewController: UIViewController {
         let t = SCNNode(geometry: tg); t.position = SCNVector3(Float(x), Float(wh-0.07), Float(z))
         scene.rootNode.addChildNode(t); glows.append(t)
         
-        // Light cone (visible volumetric-like)
-        if !broken {
-            let cone = SCNCone(topRadius: 0.3, bottomRadius: 2.0, height: CGFloat(wh - 0.3))
-            let coneMat = SCNMaterial()
-            coneMat.diffuse.contents = UIColor(red: 1, green: 0.98, blue: 0.85, alpha: 0.02)
-            coneMat.transparent.contents = UIColor(white: 1, alpha: 0.02)
-            coneMat.isDoubleSided = true
-            coneMat.transparencyMode = .default
-            cone.materials = [coneMat]
-            let coneN = SCNNode(geometry: cone)
-            coneN.position = SCNVector3(Float(x), Float(wh/2 - 0.1), Float(z))
-            scene.rootNode.addChildNode(coneN)
-        }
+        // Transparent cone meshes were a big GPU cost on iPhone, so they are disabled.
         
-        // Point light — NO shadows for performance, only 4 nearest get shadows
+        // Point light — no dynamic shadows for stability/performance
         let l = SCNLight()
         l.type = .omni
         let lColor: UIColor
@@ -314,9 +307,9 @@ class GameViewController: UIViewController {
         default: lColor = UIColor(red: 1, green: 0.99, blue: 0.88, alpha: 1)
         }
         l.color = lColor
-        l.intensity = broken ? 0 : 1500
+        l.intensity = broken ? 0 : 900
         l.attenuationStartDistance = 0.5
-        l.attenuationEndDistance = 12
+        l.attenuationEndDistance = 9
         l.attenuationFalloffExponent = 2
         l.castsShadow = false // Performance! Will enable for nearest only
         let ln = SCNNode(); ln.light = l
@@ -569,6 +562,7 @@ class GameViewController: UIViewController {
     }
     
     @objc private func startGame() {
+        inMenu = false
         initAudio()
         UIView.animate(withDuration: 0.8, animations: {
             self.menuOv.alpha = 0
@@ -664,19 +658,8 @@ class GameViewController: UIViewController {
         let tA = stam < 0.18 ? CGFloat((1-stam*5.5)*0.5) : 0
         redOv.alpha += (tA - redOv.alpha) * CGFloat(3*dt)
         
-        // Enable shadows only for 3 nearest lights
+        // Keep dynamic shadows disabled; enabling them every frame can crash/kill the app on phones.
         let cp = cam.position
-        for l in lts { l.light?.castsShadow = false }
-        let sorted = lts.sorted { a, b in
-            let da = (a.position.x-cp.x)*(a.position.x-cp.x) + (a.position.z-cp.z)*(a.position.z-cp.z)
-            let db = (b.position.x-cp.x)*(b.position.x-cp.x) + (b.position.z-cp.z)*(b.position.z-cp.z)
-            return da < db
-        }
-        for i in 0..<min(3, sorted.count) {
-            sorted[i].light?.castsShadow = true
-            sorted[i].light?.shadowSampleCount = 4
-            sorted[i].light?.shadowRadius = 2
-        }
         
         // Flicker
         for i in 0..<lts.count {
