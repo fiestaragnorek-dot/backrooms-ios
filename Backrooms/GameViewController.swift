@@ -12,9 +12,14 @@ class GameViewController: UIViewController {
     // Maze
     private let cs: CGFloat = 4.0
     private let wh: CGFloat = 3.2
-    private let gw = 12, gh = 12
+    // The world is streamed: only 3x3 rooms exist at once, new rooms appear ahead and old rooms behind are removed.
+    private let gw = 0, gh = 0
     private var maze: MazeGenerator!
     private var walls: [SCNNode] = []
+    private var worldRoot = SCNNode()
+    private var currentRoomX = Int.min
+    private var currentRoomY = Int.min
+    private let activeRadius = 1 // 1 = keep only a 3x3 block around the player
     
     // Player
     private var pY: Float = 0.3
@@ -76,7 +81,8 @@ class GameViewController: UIViewController {
         showMenu()
         lastT = CACurrentMediaTime()
         displayLink = CADisplayLink(target: self, selector: #selector(tick))
-        displayLink?.preferredFramesPerSecond = 30
+        displayLink?.preferredFramesPerSecond = 24
+        displayLink?.isPaused = true
         displayLink?.add(to: .main, forMode: .common)
     }
     
@@ -127,9 +133,9 @@ class GameViewController: UIViewController {
         sv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         sv.backgroundColor = UIColor(red: 0.78, green: 0.71, blue: 0.38, alpha: 1)
         sv.antialiasingMode = .none
-        sv.preferredFramesPerSecond = 30
-        sv.rendersContinuously = true
-        sv.isPlaying = true
+        sv.preferredFramesPerSecond = 24
+        sv.rendersContinuously = false
+        sv.isPlaying = false
         view.addSubview(sv)
         
         scene = SCNScene(); sv.scene = scene
@@ -148,106 +154,141 @@ class GameViewController: UIViewController {
         sv.pointOfView = cam
     }
     
-    // MARK: - Build
+    // MARK: - Build / streaming 3x3 rooms
     private func buildLevel() {
-        maze = MazeGenerator(width: gw, height: gh)
-        maze.generate()
-        
-        let wM = mat(wallImg, 2, 1)
-        let fM = mat(carpImg, 8, 8)
-        let cM = mat(ceilImg, 4, 4)
+        scene.rootNode.addChildNode(worldRoot)
+        // MazeGenerator is no longer used for the visible level: the world is infinite/streamed.
+        // Keeping this method tiny prevents a huge SceneKit scene from being created at launch.
+        rebuildActiveRooms(force: true)
+    }
+
+    private func roomCoord() -> (Int, Int) {
+        let rx = Int(floor(cam.position.x / Float(cs)))
+        let ry = Int(floor(cam.position.z / Float(cs)))
+        return (rx, ry)
+    }
+
+    private func rebuildActiveRoomsIfNeeded() {
+        let (rx, ry) = roomCoord()
+        if rx != currentRoomX || ry != currentRoomY { rebuildActiveRooms(force: false) }
+    }
+
+    private func rebuildActiveRooms(force: Bool) {
+        let (rx, ry) = roomCoord()
+        if !force && rx == currentRoomX && ry == currentRoomY { return }
+        currentRoomX = rx; currentRoomY = ry
+
+        worldRoot.removeFromParentNode()
+        worldRoot = SCNNode()
+        scene.rootNode.addChildNode(worldRoot)
+        walls.removeAll(keepingCapacity: true)
+        lts.removeAll(keepingCapacity: true)
+        glows.removeAll(keepingCapacity: true)
+        doors.removeAll(keepingCapacity: true)
+        drawers.removeAll(keepingCapacity: true)
+
+        let al = SCNLight(); al.type = .ambient
+        al.color = UIColor(red:1, green:0.99, blue:0.88, alpha:1)
+        al.intensity = 95
+        let an = SCNNode(); an.light = al; worldRoot.addChildNode(an)
+
+        for y in (ry-activeRadius)...(ry+activeRadius) {
+            for x in (rx-activeRadius)...(rx+activeRadius) {
+                buildRoom(x: x, y: y, centerX: rx, centerY: ry)
+            }
+        }
+    }
+
+    private func buildRoom(x: Int, y: Int, centerX: Int, centerY: Int) {
+        let special = specialTypeForRoom(x, y)
+        let wM = mat(forType: special, base: mat(wallImg, 2, 1))
+        let fM = mat(carpImg, 3, 3)
+        let cM = mat(ceilImg, 2, 2)
         let mM = mat(metImg)
         let bM = mat(baseImg)
         let coM = mat(colImg)
         let wdM = mat(woodImg)
-        let drM = mat(woodImg) // door material
-        
-        let wH = SCNBox(width: cs, height: wh, length: 0.12, chamferRadius: 0)
-        let wV = SCNBox(width: 0.12, height: wh, length: cs, chamferRadius: 0)
-        let bH = SCNBox(width: cs, height: 0.12, length: 0.06, chamferRadius: 0)
-        let bV = SCNBox(width: 0.06, height: 0.12, length: cs, chamferRadius: 0)
-        
-        for y in 0..<gh { for x in 0..<gw {
-            let cx = CGFloat(x) * cs + cs/2
-            let cz = CGFloat(y) * cs + cs/2
-            let c = maze.grid[y][x]
-            let cellW = c.isSpecial ? mat(forType: c.specialType, base: wM) : wM
-            
-            if c.north { addW(wH, cellW, cx, wh/2, cz - cs/2); addB(bH, bM, cx, 0.06, cz - cs/2 + 0.07) }
-            if c.south { addW(wH, cellW, cx, wh/2, cz + cs/2); addB(bH, bM, cx, 0.06, cz + cs/2 - 0.07) }
-            if c.east  { addW(wV, cellW, cx + cs/2, wh/2, cz); addB(bV, bM, cx + cs/2 - 0.07, 0.06, cz) }
-            if c.west  { addW(wV, cellW, cx - cs/2, wh/2, cz); addB(bV, bM, cx - cs/2 + 0.07, 0.06, cz) }
-        }}
-        
-        let bw = CGFloat(gw) * cs, bh = CGFloat(gh) * cs
-        let bWH = SCNBox(width: bw, height: wh, length: 0.15, chamferRadius: 0)
-        addW(bWH, wM, bw/2, wh/2, 0); addW(bWH, wM, bw/2, wh/2, bh)
-        let bWV = SCNBox(width: 0.15, height: wh, length: bh, chamferRadius: 0)
-        addW(bWV, wM, 0, wh/2, bh/2); addW(bWV, wM, bw, wh/2, bh/2)
-        
-        // Floor
-        let fg = SCNBox(width: bw, height: 0.02, length: bh, chamferRadius: 0)
+        let drM = wdM
+
+        let ox = CGFloat(x) * cs
+        let oz = CGFloat(y) * cs
+        let cx = ox + cs/2
+        let cz = oz + cs/2
+
+        let fg = SCNBox(width: cs, height: 0.02, length: cs, chamferRadius: 0)
         fg.materials = [fM]
-        let fn = SCNNode(geometry: fg); fn.position = SCNVector3(Float(bw/2), -0.01, Float(bh/2))
-        scene.rootNode.addChildNode(fn)
-        
-        // Ceiling
-        let cg = SCNBox(width: bw, height: 0.05, length: bh, chamferRadius: 0)
+        let fn = SCNNode(geometry: fg); fn.position = SCNVector3(Float(cx), -0.01, Float(cz))
+        worldRoot.addChildNode(fn)
+
+        let cg = SCNBox(width: cs, height: 0.05, length: cs, chamferRadius: 0)
         cg.materials = [cM]
-        let cn = SCNNode(geometry: cg); cn.position = SCNVector3(Float(bw/2), Float(wh), Float(bh/2))
-        scene.rootNode.addChildNode(cn)
-        
-        // Lamps: keep the count low on real iPhones to avoid memory/GPU crashes.
-        for y in stride(from: 0, to: gh, by: 3) { for x in stride(from: 0, to: gw, by: 3) {
-            let lx = CGFloat(x) * cs + cs/2, lz = CGFloat(y) * cs + cs/2
-            let cell = maze.grid[y][x]
-            let broken = Float.random(in: 0...1) < 0.1
-            let darkRoom = cell.isSpecial && cell.specialType == .dark
-            addLamp(x: lx, z: lz, broken: broken || darkRoom, special: cell.specialType)
-        }}
-        
-        // Ambient
-        let al = SCNLight(); al.type = .ambient; al.color = UIColor(red:1, green:0.99, blue:0.88, alpha:1); al.intensity = 80
-        let an = SCNNode(); an.light = al; scene.rootNode.addChildNode(an)
-        
-        // Columns
-        let colG = SCNBox(width: 0.28, height: wh, length: 0.28, chamferRadius: 0)
-        colG.materials = [coM]
-        for y in stride(from: 2, to: gh, by: 3) { for x in stride(from: 2, to: gw, by: 3) {
-            if Float.random(in: 0...1) < 0.4 {
-                let px = CGFloat(x)*cs + cs/2 + CGFloat(Float.random(in:-0.6...0.6))
-                let pz = CGFloat(y)*cs + cs/2 + CGFloat(Float.random(in:-0.6...0.6))
-                let col = SCNNode(geometry: colG)
-                col.position = SCNVector3(Float(px), Float(wh/2), Float(pz))
-                scene.rootNode.addChildNode(col); walls.append(col)
-            }
-        }}
-        
-        // Pipes
-        let pg = SCNCylinder(radius: 0.04, height: bw); pg.materials = [mM]
-        for z in stride(from: 2, to: gh, by: 6) {
+        let cn = SCNNode(geometry: cg); cn.position = SCNVector3(Float(cx), Float(wh), Float(cz))
+        worldRoot.addChildNode(cn)
+
+        addWallWithGap(horizontal: true, x: cx, z: oz, m: wM, base: bM)
+        addWallWithGap(horizontal: false, x: ox, z: cz, m: wM, base: bM)
+        if x == centerX + activeRadius { addWallWithGap(horizontal: false, x: ox + cs, z: cz, m: wM, base: bM) }
+        if y == centerY + activeRadius { addWallWithGap(horizontal: true, x: cx, z: oz + cs, m: wM, base: bM) }
+
+        if hash01(x, y, 10) < 0.55 { addLamp(x: cx, z: cz, broken: hash01(x,y,11) < 0.12 || special == .dark, special: special) }
+
+        if hash01(x, y, 20) < 0.25 {
+            let colG = SCNBox(width: 0.28, height: wh, length: 0.28, chamferRadius: 0)
+            colG.materials = [coM]
+            let col = SCNNode(geometry: colG)
+            col.position = SCNVector3(Float(cx + jitter(x,y,21)*0.8), Float(wh/2), Float(cz + jitter(x,y,22)*0.8))
+            worldRoot.addChildNode(col); walls.append(col)
+        }
+
+        if hash01(x, y, 30) < 0.34 { addTable(x: cx + jitter(x,y,31)*0.7, z: cz + jitter(x,y,32)*0.7, m: wdM) }
+        if hash01(x, y, 40) < 0.24 { addCabinet(x: cx + jitter(x,y,41)*0.7, z: cz + jitter(x,y,42)*0.7, m: wdM) }
+        if hash01(x, y, 50) < 0.20 { addDoor(x: cx, z: oz + 0.08, m: drM, axis: 0) }
+
+        if hash01(x, y, 60) < 0.35 {
+            let pg = SCNCylinder(radius: 0.035, height: cs); pg.materials = [mM]
             let p = SCNNode(geometry: pg)
             p.eulerAngles = SCNVector3(0, 0, Float.pi/2)
-            p.position = SCNVector3(Float(bw/2), Float(wh-0.12), Float(CGFloat(z)*cs + cs/2))
-            scene.rootNode.addChildNode(p)
+            p.position = SCNVector3(Float(cx), Float(wh-0.12), Float(cz))
+            worldRoot.addChildNode(p)
         }
-        
-        // Furniture
-        for y in stride(from: 1, to: gh, by: 3) { for x in stride(from: 1, to: gw, by: 3) {
-            if Float.random(in: 0...1) < 0.35 {
-                addTable(x: CGFloat(x)*cs+cs/2, z: CGFloat(y)*cs+cs/2+0.5, m: wdM)
-            }
-            if Float.random(in: 0...1) < 0.25 {
-                addCabinet(x: CGFloat(x)*cs+cs/2-0.5, z: CGFloat(y)*cs+cs/2, m: wdM)
-            }
-        }}
-        
-        // Doors
-        for y in stride(from: 1, to: gh, by: 4) { for x in stride(from: 0, to: gw, by: 5) {
-            if Float.random(in: 0...1) < 0.5 {
-                addDoor(x: CGFloat(x)*cs+cs/2, z: CGFloat(y)*cs, m: drM, axis: 0)
-            }
-        }}
+    }
+
+    private func addWallWithGap(horizontal: Bool, x: CGFloat, z: CGFloat, m: SCNMaterial, base: SCNMaterial) {
+        let gap: CGFloat = 1.45
+        let seg = (cs - gap) / 2
+        if horizontal {
+            let g = SCNBox(width: seg, height: wh, length: 0.12, chamferRadius: 0)
+            addW(g, m, x - (gap/2 + seg/2), wh/2, z)
+            addW(g, m, x + (gap/2 + seg/2), wh/2, z)
+            let bg = SCNBox(width: seg, height: 0.12, length: 0.06, chamferRadius: 0)
+            addB(bg, base, x - (gap/2 + seg/2), 0.06, z)
+            addB(bg, base, x + (gap/2 + seg/2), 0.06, z)
+        } else {
+            let g = SCNBox(width: 0.12, height: wh, length: seg, chamferRadius: 0)
+            addW(g, m, x, wh/2, z - (gap/2 + seg/2))
+            addW(g, m, x, wh/2, z + (gap/2 + seg/2))
+            let bg = SCNBox(width: 0.06, height: 0.12, length: seg, chamferRadius: 0)
+            addB(bg, base, x, 0.06, z - (gap/2 + seg/2))
+            addB(bg, base, x, 0.06, z + (gap/2 + seg/2))
+        }
+    }
+
+    private func specialTypeForRoom(_ x: Int, _ y: Int) -> SpecialType {
+        let v = hash01(x, y, 99)
+        if v < 0.04 { return .red }
+        if v < 0.08 { return .dark }
+        if v < 0.12 { return .flooded }
+        return .none
+    }
+
+    private func hash01(_ x: Int, _ y: Int, _ salt: Int) -> Float {
+        var n = UInt32(bitPattern: Int32(x &* 73856093 ^ y &* 19349663 ^ salt &* 83492791))
+        n ^= n << 13; n ^= n >> 17; n ^= n << 5
+        return Float(n % 10000) / 10000.0
+    }
+
+    private func jitter(_ x: Int, _ y: Int, _ salt: Int) -> CGFloat {
+        return CGFloat(hash01(x, y, salt) * 2 - 1)
     }
     
     private func mat(forType: SpecialType, base: SCNMaterial) -> SCNMaterial {
@@ -267,33 +308,33 @@ class GameViewController: UIViewController {
     }
     
     private func addLamp(x: CGFloat, z: CGFloat, broken: Bool, special: SpecialType) {
-        let mMat = mat(metImg)
+        let mMat = colorMat(UIColor.darkGray)
         // Housing
         let hg = SCNBox(width: 1.3, height: 0.06, length: 0.35, chamferRadius: 0); hg.materials = [mMat]
         let h = SCNNode(geometry: hg); h.position = SCNVector3(Float(x), Float(wh-0.03), Float(z))
-        scene.rootNode.addChildNode(h)
+        worldRoot.addChildNode(h)
         // End caps
         for sx: CGFloat in [-0.65, 0.65] {
             let cg = SCNBox(width: 0.06, height: 0.08, length: 0.35, chamferRadius: 0); cg.materials = [mMat]
             let c = SCNNode(geometry: cg); c.position = SCNVector3(Float(x+sx), Float(wh-0.04), Float(z))
-            scene.rootNode.addChildNode(c)
+            worldRoot.addChildNode(c)
         }
         // Wires
         for sx: CGFloat in [-0.4, 0.4] {
             let wg = SCNCylinder(radius: 0.008, height: 0.15); wg.materials = [mMat]
             let w = SCNNode(geometry: wg); w.position = SCNVector3(Float(x+sx), Float(wh-0.1), Float(z))
-            scene.rootNode.addChildNode(w)
+            worldRoot.addChildNode(w)
         }
         // Tube
         let tg = SCNBox(width: 1.15, height: 0.02, length: 0.26, chamferRadius: 0)
         let tMat = SCNMaterial()
-        tMat.emission.contents = lampImg
+        tMat.emission.contents = UIColor(white: 1.0, alpha: 1.0)
         tMat.emission.intensity = broken ? 0.05 : 2.0
         tMat.diffuse.contents = UIColor(white: 1, alpha: 0.9)
         tMat.isDoubleSided = true
         tg.materials = [tMat]
         let t = SCNNode(geometry: tg); t.position = SCNVector3(Float(x), Float(wh-0.07), Float(z))
-        scene.rootNode.addChildNode(t); glows.append(t)
+        worldRoot.addChildNode(t); glows.append(t)
         
         // Transparent cone meshes were a big GPU cost on iPhone, so they are disabled.
         
@@ -314,7 +355,7 @@ class GameViewController: UIViewController {
         l.castsShadow = false // Performance! Will enable for nearest only
         let ln = SCNNode(); ln.light = l
         ln.position = SCNVector3(Float(x), Float(wh-0.25), Float(z))
-        scene.rootNode.addChildNode(ln); lts.append(ln)
+        worldRoot.addChildNode(ln); lts.append(ln)
     }
     
     // Table
@@ -329,7 +370,7 @@ class GameViewController: UIViewController {
             let l = SCNNode(geometry: lg); l.position = SCNVector3(Float(lx), 0.375, Float(lz))
             p.addChildNode(l); walls.append(l)
         }
-        scene.rootNode.addChildNode(p)
+        worldRoot.addChildNode(p)
     }
     
     // Cabinet with interactable drawers
@@ -340,7 +381,7 @@ class GameViewController: UIViewController {
         bg.materials = [m]; let bn = SCNNode(geometry: bg); bn.position = SCNVector3(0, 0.65, 0)
         p.addChildNode(bn); walls.append(bn)
         // Drawer handles
-        let hM = mat(metImg); hM.metalness.contents = UIColor(white: 0.8, alpha: 1)
+        let hM = colorMat(UIColor.darkGray); hM.metalness.contents = UIColor(white: 0.8, alpha: 1)
         for dy: Float in [0.3, 0.6, 0.9] {
             let dg = SCNBox(width: 0.4, height: 0.2, length: 0.38, chamferRadius: 0)
             let dM = m.copy() as! SCNMaterial; dM.diffuse.contents = UIColor(white: 0.7, alpha: 1)
@@ -354,7 +395,7 @@ class GameViewController: UIViewController {
             let hn = SCNNode(geometry: hg); hn.position = SCNVector3(0, dy, 0.21)
             p.addChildNode(hn)
         }
-        scene.rootNode.addChildNode(p)
+        worldRoot.addChildNode(p)
     }
     
     // Door
@@ -364,12 +405,12 @@ class GameViewController: UIViewController {
         let dn = SCNNode(geometry: dg)
         dn.position = SCNVector3(Float(x), 1.1, Float(z))
         dn.name = "door"
-        scene.rootNode.addChildNode(dn)
+        worldRoot.addChildNode(dn)
         walls.append(dn)
         doors.append((node: dn, open: false, angle: 0))
         // Handle
         let hg = SCNBox(width: 0.06, height: 0.12, length: 0.08, chamferRadius: 0)
-        let hM = mat(metImg); hM.metalness.contents = UIColor(white: 0.8, alpha: 1)
+        let hM = colorMat(UIColor.darkGray); hM.metalness.contents = UIColor(white: 0.8, alpha: 1)
         hg.materials = [hM]
         let hn = SCNNode(geometry: hg); hn.position = SCNVector3(0.35, 0, 0.05)
         dn.addChildNode(hn)
@@ -378,17 +419,24 @@ class GameViewController: UIViewController {
     private func addW(_ geo: SCNGeometry, _ m: SCNMaterial, _ x: CGFloat, _ y: CGFloat, _ z: CGFloat) {
         let n = SCNNode(geometry: geo); n.geometry?.materials = [m]
         n.position = SCNVector3(Float(x), Float(y), Float(z))
-        scene.rootNode.addChildNode(n); walls.append(n)
+        worldRoot.addChildNode(n); walls.append(n)
     }
     private func addB(_ geo: SCNGeometry, _ m: SCNMaterial, _ x: CGFloat, _ y: CGFloat, _ z: CGFloat) {
         let n = SCNNode(geometry: geo); n.geometry?.materials = [m]
-        n.position = SCNVector3(Float(x), Float(y), Float(z)); scene.rootNode.addChildNode(n)
+        n.position = SCNVector3(Float(x), Float(y), Float(z)); worldRoot.addChildNode(n)
     }
     private func mat(_ img: UIImage, _ rx: Int = 1, _ ry: Int = 1) -> SCNMaterial {
         let m = SCNMaterial()
         m.diffuse.contents = img; m.diffuse.wrapS = .repeat; m.diffuse.wrapT = .repeat
         m.diffuse.contentsTransform = SCNMatrix4MakeScale(Float(rx), Float(ry), 1)
         m.roughness.contents = UIColor(white: 0.85, alpha: 1); m.locksAmbientWithDiffuse = true
+        return m
+    }
+    private func colorMat(_ color: UIColor) -> SCNMaterial {
+        let m = SCNMaterial()
+        m.diffuse.contents = color
+        m.roughness.contents = UIColor(white: 0.9, alpha: 1)
+        m.locksAmbientWithDiffuse = true
         return m
     }
     
@@ -563,6 +611,8 @@ class GameViewController: UIViewController {
     
     @objc private func startGame() {
         inMenu = false
+        displayLink?.isPaused = false
+        sv.isPlaying = true
         initAudio()
         UIView.animate(withDuration: 0.8, animations: {
             self.menuOv.alpha = 0
@@ -649,6 +699,9 @@ class GameViewController: UIViewController {
         cam.position.y = pY + bY + sin(Float(CACurrentMediaTime())*1.5)*heaveA
         cam.eulerAngles.x = pitch + bX + Float.random(in:-1...1)*shakeA
         cam.eulerAngles.y = yaw + Float.random(in:-1...1)*shakeA
+        
+        // Stream rooms: only keep a 3x3 block around the player.
+        rebuildActiveRoomsIfNeeded()
         
         // Stamina UI
         stamFill.frame = CGRect(x: 0, y: 0, width: stamBar.frame.width * CGFloat(stam), height: stamBar.frame.height)
