@@ -3,6 +3,8 @@ import UIKit
 class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        LatestLog.install()
+        LatestLog.log("AppDelegate didFinishLaunching")
         let w = UIWindow(frame: UIScreen.main.bounds)
         w.rootViewController = GameViewController()
         w.makeKeyAndVisible()
