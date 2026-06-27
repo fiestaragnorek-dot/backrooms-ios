@@ -12,6 +12,13 @@ enum StreamRoomKind {
     case stairsSpiral
 }
 
+struct DoorState {
+    var pivot: SCNNode
+    var panel: SCNNode
+    var open: Bool
+    var angle: Float
+}
+
 class GameViewController: UIViewController {
     
     // Scene
@@ -22,14 +29,13 @@ class GameViewController: UIViewController {
     // Maze
     private let cs: CGFloat = 4.0
     private let wh: CGFloat = 3.2
-    // The world is streamed: only 3x3 rooms exist at once, new rooms appear ahead and old rooms behind are removed.
-    private let gw = 0, gh = 0
+    // Static optimized map. No visible popping/rebuilding while the player moves.
+    private let gw = 7, gh = 7
     private var maze: MazeGenerator!
     private var walls: [SCNNode] = []
     private var worldRoot = SCNNode()
     private var currentRoomX = Int.min
     private var currentRoomY = Int.min
-    private let activeRadius = 1 // 1 = keep only a 3x3 block around the player
     
     // Player
     private var pY: Float = 0.3
@@ -57,7 +63,7 @@ class GameViewController: UIViewController {
     private var glows: [SCNNode] = []
     
     // Interactables
-    private var doors: [(node: SCNNode, open: Bool, angle: Float)] = []
+    private var doors: [DoorState] = []
     private var drawers: [(node: SCNNode, open: Bool, offset: Float)] = []
     
     // Textures
@@ -157,7 +163,7 @@ class GameViewController: UIViewController {
         
         scene = SCNScene(); sv.scene = scene
         scene.fogStartDistance = 1
-        scene.fogEndDistance = 28
+        scene.fogEndDistance = 34
         scene.fogColor = UIColor(red: 0.78, green: 0.71, blue: 0.38, alpha: 1)
         
         cam = SCNNode()
@@ -172,14 +178,22 @@ class GameViewController: UIViewController {
         LatestLog.log("setupScene done")
     }
     
-    // MARK: - Build / streaming 3x3 rooms
+    // MARK: - Build / static optimized level
     private func buildLevel() {
-        LatestLog.log("buildLevel streaming start")
+        LatestLog.log("buildLevel static start")
         scene.rootNode.addChildNode(worldRoot)
-        // MazeGenerator is no longer used for the visible level: the world is infinite/streamed.
-        // Keeping this method tiny prevents a huge SceneKit scene from being created at launch.
-        rebuildActiveRooms(force: true)
-        LatestLog.log("buildLevel streaming done")
+
+        let al = SCNLight(); al.type = .ambient
+        al.color = UIColor(red:1, green:0.98, blue:0.82, alpha:1)
+        al.intensity = 170
+        let an = SCNNode(); an.light = al; worldRoot.addChildNode(an)
+
+        for y in 0..<gh {
+            for x in 0..<gw {
+                buildRoom(x: x, y: y, centerX: 0, centerY: 0)
+            }
+        }
+        LatestLog.log("buildLevel static done rooms=\(gw*gh) nodes=\(worldRoot.childNodes.count)")
     }
 
     private func roomCoord() -> (Int, Int) {
@@ -188,45 +202,11 @@ class GameViewController: UIViewController {
         return (rx, ry)
     }
 
-    private func rebuildActiveRoomsIfNeeded() {
-        let (rx, ry) = roomCoord()
-        if rx != currentRoomX || ry != currentRoomY { rebuildActiveRooms(force: false) }
-    }
-
-    private func rebuildActiveRooms(force: Bool) {
-        let (rx, ry) = roomCoord()
-        if !force && rx == currentRoomX && ry == currentRoomY { return }
-        currentRoomX = rx; currentRoomY = ry
-        LatestLog.log("rebuildActiveRooms start center=\(rx),\(ry)")
-
-        worldRoot.removeFromParentNode()
-        worldRoot = SCNNode()
-        scene.rootNode.addChildNode(worldRoot)
-        walls.removeAll(keepingCapacity: true)
-        lts.removeAll(keepingCapacity: true)
-        glows.removeAll(keepingCapacity: true)
-        doors.removeAll(keepingCapacity: true)
-        drawers.removeAll(keepingCapacity: true)
-
-        let al = SCNLight(); al.type = .ambient
-        al.color = UIColor(red:1, green:0.99, blue:0.88, alpha:1)
-        al.intensity = 95
-        let an = SCNNode(); an.light = al; worldRoot.addChildNode(an)
-
-        for y in (ry-activeRadius)...(ry+activeRadius) {
-            for x in (rx-activeRadius)...(rx+activeRadius) {
-                LatestLog.log("buildRoom start x=\(x) y=\(y)")
-                buildRoom(x: x, y: y, centerX: rx, centerY: ry)
-                LatestLog.log("buildRoom done x=\(x) y=\(y)")
-            }
-        }
-        LatestLog.log("rebuildActiveRooms done center=\(rx),\(ry)")
-    }
+    private func rebuildActiveRoomsIfNeeded() { }
 
     private func buildRoom(x: Int, y: Int, centerX: Int, centerY: Int) {
         let kind = roomKind(x, y)
         let special = specialTypeForRoom(x, y)
-        LatestLog.log("buildRoom kind=\(kind) special=\(special)")
         let wM = mat(forType: special, base: mat(wallImg, 2, 1))
         let fM = mat(carpImg, 3, 3)
         let cM = mat(ceilImg, 2, 2)
@@ -255,10 +235,10 @@ class GameViewController: UIViewController {
 
         addWallWithGap(horizontal: true, x: cx, z: oz, m: wM, base: bM)
         addWallWithGap(horizontal: false, x: ox, z: cz, m: wM, base: bM)
-        if x == centerX + activeRadius { addWallWithGap(horizontal: false, x: ox + cs, z: cz, m: wM, base: bM) }
-        if y == centerY + activeRadius { addWallWithGap(horizontal: true, x: cx, z: oz + cs, m: wM, base: bM) }
+        if x == gw - 1 { addWallWithGap(horizontal: false, x: ox + cs, z: cz, m: wM, base: bM) }
+        if y == gh - 1 { addWallWithGap(horizontal: true, x: cx, z: oz + cs, m: wM, base: bM) }
 
-        if hash01(x, y, 10) < 0.55 { addLamp(x: cx, z: cz, broken: hash01(x,y,11) < 0.12 || special == .dark, special: special) }
+        if hash01(x, y, 10) < 0.28 { addLamp(x: cx, z: cz, broken: hash01(x,y,11) < 0.12 || special == .dark, special: special) }
 
         if kind == .emptyLarge {
             addLargeEmptyRoomHints(cx: cx, cz: cz, m: coM)
@@ -283,12 +263,12 @@ class GameViewController: UIViewController {
         }
 
         if kind == .normal || kind == .fakeUpMaze {
-            if hash01(x, y, 30) < 0.34 { addTable(x: cx + jitter(x,y,31)*0.7, z: cz + jitter(x,y,32)*0.7, m: wdM) }
-            if hash01(x, y, 40) < 0.24 { addCabinet(x: cx + jitter(x,y,41)*0.7, z: cz + jitter(x,y,42)*0.7, m: wdM) }
+            if hash01(x, y, 30) < 0.10 { addTable(x: cx + jitter(x,y,31)*0.7, z: cz + jitter(x,y,32)*0.7, m: wdM) }
+            if hash01(x, y, 40) < 0.06 { addCabinet(x: cx + jitter(x,y,41)*0.7, z: cz + jitter(x,y,42)*0.7, m: wdM) }
         }
-        if kind != .slide && hash01(x, y, 50) < 0.20 { addDoor(x: cx, z: oz + 0.08, m: drM, axis: 0) }
+        if kind != .slide && hash01(x, y, 50) < 0.08 { addDoor(x: cx, z: oz + 0.08, m: drM, axis: 0) }
 
-        if hash01(x, y, 60) < 0.35 {
+        if hash01(x, y, 60) < 0.18 {
             let pg = SCNCylinder(radius: 0.035, height: cs); pg.materials = [mM]
             let p = SCNNode(geometry: pg)
             p.eulerAngles = SCNVector3(0, 0, Float.pi/2)
@@ -298,7 +278,7 @@ class GameViewController: UIViewController {
     }
 
     private func addWallWithGap(horizontal: Bool, x: CGFloat, z: CGFloat, m: SCNMaterial, base: SCNMaterial) {
-        let gap: CGFloat = 1.45
+        let gap: CGFloat = 1.05
         let seg = (cs - gap) / 2
         if horizontal {
             let g = SCNBox(width: seg, height: wh, length: 0.12, chamferRadius: 0)
@@ -318,13 +298,14 @@ class GameViewController: UIViewController {
     }
 
     private func roomKind(_ x: Int, _ y: Int) -> StreamRoomKind {
+        // Rare special rooms, so the level does not look like furniture spam.
         let v = hash01(x, y, 7)
-        if v < 0.07 { return .emptyLarge }
-        if v < 0.14 { return .junkPile }
-        if v < 0.19 { return .slide }
-        if v < 0.24 { return .fakeUpMaze }
-        if v < 0.30 { return .stairsStraight }
-        if v < 0.34 { return .stairsSpiral }
+        if v < 0.08 { return .emptyLarge }
+        if v < 0.12 { return .junkPile }
+        if v < 0.15 { return .slide }
+        if v < 0.18 { return .fakeUpMaze }
+        if v < 0.21 { return .stairsStraight }
+        if v < 0.23 { return .stairsSpiral }
         return .normal
     }
 
@@ -350,7 +331,7 @@ class GameViewController: UIViewController {
     }
 
     private func addJunkPile(cx: CGFloat, cz: CGFloat, m: SCNMaterial, metal: SCNMaterial, seedX: Int, seedY: Int) {
-        for i in 0..<10 {
+        for i in 0..<5 {
             let w = CGFloat(Float(0.25) + hash01(seedX, seedY, 100+i) * Float(0.45))
             let h = CGFloat(Float(0.18) + hash01(seedX, seedY, 130+i) * Float(0.55))
             let d = CGFloat(Float(0.25) + hash01(seedX, seedY, 160+i) * Float(0.45))
@@ -407,7 +388,7 @@ class GameViewController: UIViewController {
         let poleG = SCNCylinder(radius: 0.045, height: 2.6); poleG.materials = [m]
         let pole = SCNNode(geometry: poleG); pole.position = SCNVector3(Float(cx), Float(1.3), Float(cz))
         worldRoot.addChildNode(pole)
-        for i in 0..<10 {
+        for i in 0..<5 {
             let g = SCNBox(width: 0.85, height: 0.08, length: 0.28, chamferRadius: 0)
             g.materials = [m]
             let n = SCNNode(geometry: g)
@@ -499,9 +480,9 @@ class GameViewController: UIViewController {
         default: lColor = UIColor(red: 1, green: 0.99, blue: 0.88, alpha: 1)
         }
         l.color = lColor
-        l.intensity = broken ? 0 : 900
+        l.intensity = broken ? 0 : 520
         l.attenuationStartDistance = 0.5
-        l.attenuationEndDistance = 9
+        l.attenuationEndDistance = 7
         l.attenuationFalloffExponent = 2
         l.castsShadow = false // Performance! Will enable for nearest only
         let ln = SCNNode(); ln.light = l
@@ -549,22 +530,29 @@ class GameViewController: UIViewController {
         worldRoot.addChildNode(p)
     }
     
-    // Door
+    // Door with a real hinge pivot. Opens sideways instead of spinning around the center.
     private func addDoor(x: CGFloat, z: CGFloat, m: SCNMaterial, axis: Float) {
-        let dg = SCNBox(width: 0.9, height: 2.2, length: 0.06, chamferRadius: 0)
+        let pivot = SCNNode()
+        pivot.position = SCNVector3(Float(x - 0.45), 1.1, Float(z))
+        pivot.name = "doorPivot"
+
+        let dg = SCNBox(width: 0.9, height: 2.15, length: 0.055, chamferRadius: 0)
         dg.materials = [m]
-        let dn = SCNNode(geometry: dg)
-        dn.position = SCNVector3(Float(x), 1.1, Float(z))
-        dn.name = "door"
-        worldRoot.addChildNode(dn)
-        walls.append(dn)
-        doors.append((node: dn, open: false, angle: 0))
-        // Handle
+        let panel = SCNNode(geometry: dg)
+        panel.position = SCNVector3(0.45, 0, 0)
+        panel.name = "door"
+        pivot.addChildNode(panel)
+
         let hg = SCNBox(width: 0.06, height: 0.12, length: 0.08, chamferRadius: 0)
         let hM = colorMat(UIColor.darkGray); hM.metalness.contents = UIColor(white: 0.8, alpha: 1)
         hg.materials = [hM]
-        let hn = SCNNode(geometry: hg); hn.position = SCNVector3(0.35, 0, 0.05)
-        dn.addChildNode(hn)
+        let hn = SCNNode(geometry: hg); hn.position = SCNVector3(0.72, 0, 0.055)
+        panel.addChildNode(hn)
+
+        worldRoot.addChildNode(pivot)
+        doors.append(DoorState(pivot: pivot, panel: panel, open: false, angle: 0))
+        // Keep closed doors in collision list; remove them when open in collides().
+        walls.append(panel)
     }
     
     private func addW(_ geo: SCNGeometry, _ m: SCNMaterial, _ x: CGFloat, _ y: CGFloat, _ z: CGFloat) {
@@ -594,6 +582,7 @@ class GameViewController: UIViewController {
     // MARK: - Collision
     private func collides(_ nx: Float, _ nz: Float) -> Bool {
         for w in walls {
+            if doors.contains(where: { $0.open && $0.panel === w }) { continue }
             let wp = w.presentation.worldPosition
             let (mn, mx) = w.boundingBox
             let hw = (mx.x - mn.x)/2 + 0.3
@@ -611,9 +600,9 @@ class GameViewController: UIViewController {
         // Check doors
         for i in 0..<doors.count {
             var d = doors[i]
-            let dp = d.node.presentation.worldPosition
+            let dp = d.panel.presentation.worldPosition
             let dx = pos.x - dp.x, dz = pos.z - dp.z
-            if dx*dx + dz*dz < 4.0 {
+            if dx*dx + dz*dz < 3.2 {
                 d.open = !d.open
                 playDoor()
                 doors[i] = d
@@ -907,8 +896,6 @@ class GameViewController: UIViewController {
         cam.eulerAngles.x = pitch + bX + Float.random(in:-1...1)*shakeA
         cam.eulerAngles.y = yaw + Float.random(in:-1...1)*shakeA
         
-        // Stream rooms: only keep a 3x3 block around the player.
-        rebuildActiveRoomsIfNeeded()
         handleRoomEffects(dt: dt)
         
         // Stamina UI
@@ -928,10 +915,10 @@ class GameViewController: UIViewController {
             if Float.random(in:0...1) < 0.003 {
                 l.light!.intensity = 100; glows[i].geometry?.materials.first?.emission.intensity = 0.15
             } else if Float.random(in:0...1) < 0.01 {
-                l.light!.intensity = CGFloat(600 + Float.random(in:0...600))
+                l.light!.intensity = CGFloat(320 + Float.random(in:0...220))
                 glows[i].geometry?.materials.first?.emission.intensity = CGFloat(Float.random(in:0.8...1.5))
             } else {
-                l.light!.intensity = CGFloat(1400 + sin(Float(CACurrentMediaTime())*0.8+Float(i)*6.1)*120)
+                l.light!.intensity = CGFloat(520 + sin(Float(CACurrentMediaTime())*0.8+Float(i)*6.1)*35)
                 glows[i].geometry?.materials.first?.emission.intensity = 2.0
             }
         }
@@ -939,9 +926,9 @@ class GameViewController: UIViewController {
         // Animate doors
         for i in 0..<doors.count {
             var d = doors[i]
-            let target: Float = d.open ? Float.pi/2 : 0
-            d.angle += (target - d.angle) * 4 * dt
-            d.node.eulerAngles.y = d.angle
+            let target: Float = d.open ? -Float.pi/2 : 0
+            d.angle += (target - d.angle) * 5 * dt
+            d.pivot.eulerAngles.y = d.angle
             doors[i] = d
         }
         
@@ -956,9 +943,9 @@ class GameViewController: UIViewController {
         
         // Interaction prompt
         let nearDoor = doors.contains { d in
-            let dp = d.node.presentation.worldPosition
+            let dp = d.panel.presentation.worldPosition
             let dx = cp.x - dp.x, dz = cp.z - dp.z
-            return dx*dx + dz*dz < 4.0
+            return dx*dx + dz*dz < 3.2
         }
         let nearDrawer = drawers.contains { d in
             let dp = d.node.presentation.worldPosition
