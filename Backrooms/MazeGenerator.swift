@@ -62,7 +62,7 @@ class MazeGenerator {
         var r: [(Int,Int,String)] = []
         if y>0 && !grid[y-1][x].visited { r.append((x,y-1,"N")) }
         if y<h-1 && !grid[y+1][x].visited { r.append((x,y+1,"S")) }
-        if x<w-1 && !grid[y][x+1].visited { r.append((x,y+1,"E")) }
+        if x<w-1 && !grid[y][x+1].visited { r.append((x+1,y,"E")) }
         if x>0 && !grid[y][x-1].visited { r.append((x-1,y,"W")) }
         return r
     }
