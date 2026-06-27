@@ -40,7 +40,8 @@ final class LatestLog {
     
     private func log(_ message: String) {
         let line = "[\(Date())] \(message)\n"
-        queue.async { Self.append(line, to: self.url) }
+        // Write synchronously so the last successful step is visible even if the app crashes immediately after it.
+        Self.append(line, to: self.url)
         print(line, terminator: "")
     }
     
