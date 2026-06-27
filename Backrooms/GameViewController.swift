@@ -197,7 +197,7 @@ class GameViewController: UIViewController {
         let (rx, ry) = roomCoord()
         if !force && rx == currentRoomX && ry == currentRoomY { return }
         currentRoomX = rx; currentRoomY = ry
-        LatestLog.log("rebuildActiveRooms center=\(rx),\(ry)")
+        LatestLog.log("rebuildActiveRooms start center=\(rx),\(ry)")
 
         worldRoot.removeFromParentNode()
         worldRoot = SCNNode()
@@ -215,14 +215,18 @@ class GameViewController: UIViewController {
 
         for y in (ry-activeRadius)...(ry+activeRadius) {
             for x in (rx-activeRadius)...(rx+activeRadius) {
+                LatestLog.log("buildRoom start x=\(x) y=\(y)")
                 buildRoom(x: x, y: y, centerX: rx, centerY: ry)
+                LatestLog.log("buildRoom done x=\(x) y=\(y)")
             }
         }
+        LatestLog.log("rebuildActiveRooms done center=\(rx),\(ry)")
     }
 
     private func buildRoom(x: Int, y: Int, centerX: Int, centerY: Int) {
         let kind = roomKind(x, y)
         let special = specialTypeForRoom(x, y)
+        LatestLog.log("buildRoom kind=\(kind) special=\(special)")
         let wM = mat(forType: special, base: mat(wallImg, 2, 1))
         let fM = mat(carpImg, 3, 3)
         let cM = mat(ceilImg, 2, 2)
@@ -423,9 +427,15 @@ class GameViewController: UIViewController {
     }
 
     private func hash01(_ x: Int, _ y: Int, _ salt: Int) -> Float {
-        var n = UInt32(bitPattern: Int32(x &* 73856093 ^ y &* 19349663 ^ salt &* 83492791))
-        n ^= n << 13; n ^= n >> 17; n ^= n << 5
-        return Float(n % 10000) / 10000.0
+        // Important: do not convert the mixed value to Int32.
+        // Some salts are large and Int32(...) traps on iOS, causing a black-screen crash during buildLevel().
+        var n = UInt64(bitPattern: Int64(x)) &* 73_856_093
+        n ^= UInt64(bitPattern: Int64(y)) &* 19_349_663
+        n ^= UInt64(bitPattern: Int64(salt)) &* 83_492_791
+        n ^= n << 13
+        n ^= n >> 7
+        n ^= n << 17
+        return Float(n % 10_000) / Float(10_000)
     }
 
     private func jitter(_ x: Int, _ y: Int, _ salt: Int) -> CGFloat {
