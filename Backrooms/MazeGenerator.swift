@@ -46,10 +46,12 @@ class MazeGenerator {
             }
         }}
         
-        // Special rooms
-        let specials: [(Int,SpecialType)] = [(3,.dark), (6,.red), (9,.flooded)]
+        // Special rooms. Keep indices inside the current maze size.
+        let specials: [(Int,SpecialType)] = [(2,.dark), (4,.red), (6,.flooded)]
         for (idx, st) in specials {
-            let sy = idx, sx = w - 3
+            guard h > 2, w > 3 else { continue }
+            let sy = min(max(idx, 0), h - 1)
+            let sx = min(max(w - 3, 0), w - 1)
             grid[sy][sx].isSpecial = true
             grid[sy][sx].specialType = st
             // Open all internal walls in special room
