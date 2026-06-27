@@ -1,22 +1,20 @@
-Backrooms iOS — fixed build package
+Backrooms iOS — v4 streaming 3x3 rooms
 
-Что исправлено:
-1) Backrooms/MazeGenerator.swift — исправлено движение на восток в генераторе лабиринта.
-2) Backrooms/GameViewController.swift — после кнопки ИГРАТЬ теперь выключается inMenu.
-3) Снижена нагрузка SceneKit под iPhone: 30 FPS, без MSAA/HDR, меньше ламп, без динамических теней и прозрачных cone-мешей.
+Что сделано:
+1) Нужные механики возвращены: текстуры, лампы, двери, шкафы/ящики, столы, колонны, трубы, звуки, UI.
+2) Оптимизация теперь не через вырезание контента, а через стриминг мира:
+   - одновременно в SceneKit существует только блок 3x3 комнат вокруг игрока;
+   - когда игрок проходит дальше, комнаты сзади удаляются;
+   - впереди создаются новые комнаты;
+   - мир выглядит бесконечным, но нагрузка маленькая.
+3) Убраны тяжёлые динамические тени/volumetric cone meshes/HDR/MSAA.
+4) Исправлено inMenu=false после кнопки ИГРАТЬ.
+5) Убраны entitlements из project.yml для более нормальной переподписи SideStore.
 
-Как собрать IPA через GitHub Actions:
-1. Создать/открыть репозиторий GitHub.
-2. Загрузить содержимое этого архива в корень репозитория.
-3. Открыть Actions -> Build IPA -> Run workflow.
-4. После успеха скачать artifact Backrooms.
-5. Внутри будет Backrooms.ipa.
+Сборка на Mac:
+  brew install xcodegen
+  chmod +x build_local_ipa.sh
+  ./build_local_ipa.sh
 
-Если есть git на компьютере:
- git clone <repo-url>
- # скопировать файлы из архива поверх репозитория
- git add .
- git commit -m "fix: stabilize iPhone build"
- git push
-
-Workflow уже лежит в .github/workflows/build.yml.
+Сборка через GitHub Actions:
+  Залить проект -> Actions -> Build IPA -> скачать artifact Backrooms.
